@@ -21,10 +21,16 @@ replaceArg n1 n = \case
     ParensT t -> ParensT (replaceArg n1 n t)
     x -> x
 
+ioUnitLast :: Type -> Type
+ioUnitLast = \case
+    AppT t1 t2 -> AppT t1 (ioUnitLast t2)
+    ConT{} -> (AppT (ConT . mkName $ "IO") (ConT . mkName $ "()"))
+    x -> x
+
 ioLast :: Type -> Type
 ioLast = \case
     AppT t1 t2 -> AppT t1 (ioLast t2)
-    ConT{} -> (AppT (ConT . mkName $ "IO") (ConT . mkName $ "()"))
+    ConT t -> (AppT (ConT . mkName $ "IO") (ConT t))
     x -> x
 
 createDataStruct :: String -> [String] -> Q Dec
@@ -39,11 +45,13 @@ createDataStruct st strs = do
             let mutate =
                     (\(ConT n) -> n) (head list) == struct
                         && (\(ConT n) -> n) (last list) == struct
-            unless mutate (error "can only use this on mutation operations")
             let args =
                     map
                         (Bang NoSourceUnpackedness NoSourceStrictness,)
-                        (init . tail $ list)
+                        ( if mutate
+                            then init . tail $ list
+                            else tail . tail $ list
+                        )
             pure $ NormalC (mkName $ "R'" <> n) args
         _ -> error "did you call this on a non function?"
     let derive = DerivClause Nothing [ConT (mkName "Show"), ConT (mkName "Generic"), ConT (mkName "Binny")]
@@ -69,27 +77,32 @@ createFunctions st strs = do
             let mutate =
                     (\(ConT n) -> n) (head list) == struct
                         && (\(ConT n) -> n) (last list) == struct
-            let consLen = if mutate then length list - 3 else length list - 1
+            let consLen = length list - 3
             let vars = map (\c -> VarP . mkName $ "a" <> show c) [0 .. consLen]
             let constructor = listToApp . reverse $ dataName : map (\c -> VarE . mkName $ "a" <> show c) [0 .. consLen]
             let cons = pure constructor
-            if mutate
-                then do
-                    let types = ioLast newType
-                    -- error $ show newType ++ "\n" ++ show types
-                    call <-
+            let types = (if mutate then ioUnitLast else ioLast) newType
+            call <-
+                if mutate
+                    then
                         [|
                             runTCPClient addr port $ \s -> do
                                 sendAll s (bin ($cons))
                                 _ <- recv s 1
                                 pure ()
                             |]
-                    let lamArgs = [ConP remoteStruct [] [VarP . mkName $ "addr", VarP . mkName $ "port"]] <> vars
-                    pure
-                        [ SigD name types
-                        , FunD name [Clause [] (NormalB $ LamE lamArgs call) []]
-                        ]
-                else undefined
+                    else
+                        [|
+                            runTCPClient addr port $ \s -> do
+                                sendAll s (bin ($cons))
+                                ans <- recv s 1024
+                                pure $ debin ans
+                            |]
+            let lamArgs = [ConP remoteStruct [] [VarP . mkName $ "addr", VarP . mkName $ "port"]] <> vars
+            pure
+                [ SigD name types
+                , FunD name [Clause [] (NormalB $ LamE lamArgs call) []]
+                ]
         _ -> error "did you call this on a non function?"
     pure $ concat defs
 

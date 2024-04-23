@@ -4,6 +4,7 @@
 module RPC where
 
 import Control.Monad
+import Data.ByteString qualified as BS
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Name (..), OccName (OccName))
 
@@ -87,15 +88,22 @@ createFunctions st strs = do
                     then
                         [|
                             runTCPClient addr port $ \s -> do
-                                sendAll s (bin ($cons))
+                                let item = bin $cons
+                                let len = bin $ BS.length item
+                                sendAll s len
+                                sendAll s item
                                 _ <- recv s 1
                                 pure ()
                             |]
                     else
                         [|
                             runTCPClient addr port $ \s -> do
-                                sendAll s (bin ($cons))
-                                ans <- recv s 1024
+                                let item = bin $cons
+                                let len = bin $ BS.length item
+                                sendAll s len
+                                sendAll s item
+                                ansLen <- debin <$> recv s 4
+                                ans <- recv s ansLen
                                 pure $ debin ans
                             |]
             let lamArgs = [ConP remoteStruct [] [VarP . mkName $ "addr", VarP . mkName $ "port"]] <> vars
@@ -124,11 +132,11 @@ createServeFunc = debug "not implemented"
 
 createRPC :: String -> [String] -> Q [Dec]
 createRPC s str = do
-    serveFunc <- createServeFunc s
+    -- serveFunc <- createServeFunc s
     remoteStruct <- createRemoteStruct s
     dataStruct <- createDataStruct s str
     functions <- createFunctions s str
-    pure $ serveFunc : remoteStruct : dataStruct : functions
+    pure $ remoteStruct : dataStruct : functions
 
 debug :: forall a b. (Show a) => a -> b
 debug = error . show

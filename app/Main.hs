@@ -15,13 +15,8 @@ import RPC (createRPC)
 
 newtype Env = Env {counter :: Int} deriving (Show)
 
-updateRef :: (a -> a) -> IORef a -> IO ()
-updateRef f r = readIORef r >>= writeIORef r . f
-readRef :: IORef a -> IO a
-readRef = readIORef
-
-updateEnv :: Int -> IORef Env -> IO ()
-updateEnv i = updateRef $ \env -> env{counter = counter env + i}
+updateRef :: IORef a -> (a -> a) -> IO ()
+updateRef r f = readIORef r >>= writeIORef r . f
 
 updateCounter :: Env -> Int -> Env
 updateCounter e i = e{counter = counter e + i}
@@ -38,17 +33,22 @@ serve :: Env -> IO ()
 serve rawE = do
   e <- newIORef rawE
   void . runTCPServer (Just "localhost") "8000" $ \s -> do
-    msg <- debin <$> recv s 1024
+    len <- debin <$> recv s 4
+    msg <- debin <$> recv s len
+
     case msg of
       R'updateCounter i -> do
-        updateEnv i e
+        updateRef e $ \env -> env{counter = counter env + i}
         sendAll s (BS.singleton 0)
       R'updateCounter2 i j -> do
-        updateEnv (i + j) e
+        updateRef e $ \env -> env{counter = counter env + i + j}
         sendAll s (BS.singleton 0)
       R'getCounter -> do
         r <- readIORef e
-        sendAll s (bin $ counter r)
+        let ans = bin $ counter r
+        let ansLen = BS.length ans
+        sendAll s (bin ansLen)
+        sendAll s ans
 
 main :: IO ()
 main = do

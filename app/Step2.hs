@@ -33,8 +33,10 @@ serve :: Env -> IO ()
 serve rawE = do
   e <- newIORef rawE
   void . runTCPServer (Just "localhost") "8000" $ \s -> do
+    putStrLn "getting message"
     msg <- debin <$> recv s 1024
-    case msg of
+    putStrLn $ "got message: " <> show msg
+    case traceShowId msg of
       UpdateCounter _ -> do
         updateCounter e
       GetCounter -> do
@@ -50,7 +52,7 @@ main = do
     a <- runTCPClient "localhost" "8000" $ \s -> do
       sendAll s (bin GetCounter)
       recv s 1024
-    print . head . BS.unpack $ a
+    print a
     -- ans <- recv s 1024
     -- print ans
     threadDelay 3000

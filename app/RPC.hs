@@ -119,10 +119,16 @@ createRemoteStruct st = do
             ]
     return $ DataD [] remoteStruct [] Nothing cons []
 
+createServeFunc :: String -> Q Dec
+createServeFunc = debug "not implemented"
+
 createRPC :: String -> [String] -> Q [Dec]
-createRPC s str =
-    ((:) <$> createRemoteStruct s)
-        <*> (((:) <$> createDataStruct s str) <*> createFunctions s str)
+createRPC s str = do
+    serveFunc <- createServeFunc s
+    remoteStruct <- createRemoteStruct s
+    dataStruct <- createDataStruct s str
+    functions <- createFunctions s str
+    pure $ serveFunc : remoteStruct : dataStruct : functions
 
 debug :: forall a b. (Show a) => a -> b
 debug = error . show

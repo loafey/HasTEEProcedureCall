@@ -57,6 +57,8 @@ main = do
   forever $ do
     updateCounter'R e 1
     updateCounter2'R e 1 2
+
     curr <- getCounter'R e
     print curr
+
     threadDelay 300000

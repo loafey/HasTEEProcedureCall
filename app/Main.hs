@@ -1,13 +1,13 @@
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
-import Binny (Bin (bin))
+import Binny (Binny (..))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Debug.Trace (traceShowId)
 import GHC.Generics (Generic)
 import Network.Run.TCP (runTCPClient, runTCPServer)
 import Network.Socket.ByteString (recv, sendAll)
@@ -25,27 +25,19 @@ getCounter :: IORef Env -> IO Int
 getCounter = (counter <$>) . readIORef
 
 data Message
-  = UpdateCounter
+  = UpdateCounter Int
   | GetCounter
-  deriving (Show, Generic, Bin)
-
--- toBytes :: Message -> BS.ByteString
--- toBytes = \case
---   UpdateCounter -> BS.singleton 0
---   GetCounter -> BS.singleton 1
-fromBytes :: BS.ByteString -> Message
-fromBytes b = case head . BS.unpack $ b of
-  0 -> UpdateCounter
-  1 -> GetCounter
-  x -> error $ "unknown constructor: " <> show x
+  deriving (Show, Generic, Binny)
 
 serve :: Env -> IO ()
 serve rawE = do
   e <- newIORef rawE
   void . runTCPServer (Just "localhost") "8000" $ \s -> do
-    msg <- fromBytes <$> recv s 1024
-    case msg of
-      UpdateCounter -> do
+    putStrLn "getting message"
+    msg <- debin <$> recv s 1024
+    putStrLn $ "got message: " <> show msg
+    case traceShowId msg of
+      UpdateCounter _ -> do
         updateCounter e
       GetCounter -> do
         i <- getCounter e
@@ -53,14 +45,18 @@ serve rawE = do
 
 main :: IO ()
 main = do
-  void . forkIO . serve $ Env 0
-  forever $ do
-    runTCPClient "localhost" "8000" $ \s -> do
-      sendAll s (bin UpdateCounter)
-    a <- runTCPClient "localhost" "8000" $ \s -> do
-      sendAll s (bin GetCounter)
-      recv s 1024
-    print (head . BS.unpack $ a)
-    -- ans <- recv s 1024
-    -- print ans
-    threadDelay 3000
+  let a = UpdateCounter 2
+  putStrLn $ "Encoding: " <> show a
+  putStrLn $ "Decoded: " <> show (debin (bin a) :: Message)
+
+-- void . forkIO . serve $ Env 0
+-- forever $ do
+--   runTCPClient "localhost" "8000" $ \s -> do
+--     sendAll s (bin (UpdateCounter 2))
+--   a <- runTCPClient "localhost" "8000" $ \s -> do
+--     sendAll s (bin GetCounter)
+--     recv s 1024
+--   print a
+--   -- ans <- recv s 1024
+--   -- print ans
+--   threadDelay 3000

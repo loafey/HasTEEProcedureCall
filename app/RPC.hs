@@ -49,6 +49,11 @@ createDataStruct st strs = do
     let derive = DerivClause Nothing [ConT (mkName "Generic"), ConT (mkName "Binny")]
     return $ DataD [] remoteStruct [] Nothing cons [derive]
 
+listToApp :: [Exp] -> Exp
+listToApp [] = error "unreachable"
+listToApp [a] = a
+listToApp (a : bs) = AppE (listToApp bs) a
+
 createFunctions :: String -> [String] -> Q [Dec]
 createFunctions st strs = do
     (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
@@ -59,10 +64,15 @@ createFunctions st strs = do
         VarI (Name (OccName n) _) t _ -> do
             let newType = replaceArg struct remoteStruct t
             let name = mkName (n <> "'R")
+            let dataName = ConE $ mkName ("R'" <> n)
             let list = argList t
             let mutate =
                     (\(ConT n) -> n) (head list) == struct
                         && (\(ConT n) -> n) (last list) == struct
+            let consLen = if mutate then length list - 3 else length list - 1
+            let vars = map (\c -> VarP . mkName $ "a" <> show c) [0 .. consLen]
+            let constructor = listToApp . reverse $ dataName : map (\c -> VarE . mkName $ "a" <> show c) [0 .. consLen]
+            let cons = pure constructor
             if mutate
                 then do
                     let types = ioLast newType
@@ -70,11 +80,11 @@ createFunctions st strs = do
                     call <-
                         [|
                             runTCPClient addr port $ \s -> do
-                                sendAll s (bin (R'updateCounter a1))
-                                recv s 1
+                                sendAll s (bin ($cons))
+                                _ <- recv s 1
                                 pure ()
                             |]
-                    let lamArgs = [VarP . mkName $ "e", VarP . mkName $ "a1"]
+                    let lamArgs = [ConP remoteStruct [] [VarP . mkName $ "addr", VarP . mkName $ "port"]] <> vars
                     pure
                         [ SigD name types
                         , FunD name [Clause [] (NormalB $ LamE lamArgs call) []]
@@ -100,6 +110,9 @@ createRPC :: String -> [String] -> Q [Dec]
 createRPC s str =
     ((:) <$> createRemoteStruct s)
         <*> (((:) <$> createDataStruct s str) <*> createFunctions s str)
+
+debug :: forall a b. (Show a) => a -> b
+debug = error . show
 
 -- mkCurryDec ith = do
 --     let name = mkName $ "rem_" ++ ith

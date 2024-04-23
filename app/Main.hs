@@ -22,15 +22,17 @@ readRef = readIORef
 
 updateEnv :: Int -> IORef Env -> IO ()
 updateEnv i = updateRef $ \env -> env{counter = counter env + i}
-getCounter :: IORef Env -> IO Int
-getCounter = (counter <$>) . readIORef
 
 updateCounter :: Env -> Int -> Env
 updateCounter e i = e{counter = counter e + i}
-getCounterLocal :: Env -> Int
-getCounterLocal = counter
 
-$(createRPC "Env" ["updateCounter"])
+updateCounter2 :: Env -> Int -> Int -> Env
+updateCounter2 e i j = e{counter = counter e + i + j}
+
+getCounter :: Env -> Int
+getCounter = counter
+
+$(createRPC "Env" ["updateCounter", "updateCounter2"])
 
 serve :: Env -> IO ()
 serve rawE = do
@@ -43,6 +45,11 @@ serve rawE = do
         r <- readIORef e
         print r
         sendAll s (BS.singleton 0)
+      R'updateCounter2 i j -> do
+        updateEnv (i + j) e
+        r <- readIORef e
+        print r
+        sendAll s (BS.singleton 0)
 
 main :: IO ()
 main = do
@@ -50,10 +57,11 @@ main = do
   let e = Env'R "localhost" "8000"
   forever $ do
     updateCounter'R e 1
+    updateCounter2'R e 1 2
     -- a <- runTCPClient "localhost" "8000" $ \s -> do
     --   sendAll s (bin GetCounter)
     --   recv s 1024
     -- print . head . BS.unpack $ a
     -- ans <- recv s 1024
     -- print ans
-    threadDelay 3000
+    threadDelay 300000

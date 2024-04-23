@@ -8,6 +8,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Debug.Trace (traceShowId)
 import GHC.Generics (Generic)
 import Network.Run.TCP (runTCPClient, runTCPServer)
 import Network.Socket.ByteString (recv, sendAll)
@@ -39,7 +40,7 @@ serve rawE = do
   e <- newIORef rawE
   void . runTCPServer (Just "localhost") "8000" $ \s -> do
     msg <- debin <$> recv s 1024
-    case msg of
+    case traceShowId msg of
       R'updateCounter i -> do
         updateEnv i e
         r <- readIORef e
@@ -53,6 +54,9 @@ serve rawE = do
 
 main :: IO ()
 main = do
+  let test = bin $ R'updateCounter2 10 20
+  print (debin test :: Env'R'Message)
+
   void . forkIO . serve $ Env 0
   let e = Env'R "localhost" "8000"
   forever $ do

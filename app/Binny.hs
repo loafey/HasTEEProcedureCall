@@ -6,7 +6,7 @@ module Binny where
 
 import Data.ByteString qualified as BS
 import Data.Word (Word8)
-import GHC.Generics (Generic (Rep, from, to), K1 (..), M1 (M1), U1 (U1), (:*:), (:+:) (..))
+import GHC.Generics (Generic (Rep, from, to), K1 (..), M1 (M1), U1 (U1), (:*:) (..), (:+:) (..))
 import Generics.Deriving (V1)
 
 class Binny a where
@@ -48,12 +48,19 @@ instance (Bin' f, Bin' g) => Bin' (f :+: g) where -- Either
         (1 : es) -> R1 (debin' (BS.pack es))
         _ -> error "secret third constuctor?"
 
-instance Bin' ((:*:) f g) where -- (,)
+instance (Bin' f, Bin' g) => Bin' ((:*:) f g) where -- (,)
     bin' :: (:*:) f g p -> BS.ByteString
-    bin' = error "bin :*:"
+    bin' (f :*: g) =
+        let a = bin' f
+            b = bin' g
+         in bin (BS.length a) <> a <> b
 
     debin' :: BS.ByteString -> (:*:) f g p
-    debin' = error "debin :*:"
+    debin' bs =
+        let aLen = debin bs :: Int
+            a = debin' bs
+            b = debin' $ BS.drop (aLen + 4) bs
+         in a :*: b
 
 instance (Binny c) => Bin' (K1 i c) where -- a container for a c
     bin' :: K1 i c p -> BS.ByteString

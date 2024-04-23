@@ -46,7 +46,7 @@ createDataStruct st strs = do
                         (init . tail $ list)
             pure $ NormalC (mkName $ "R'" <> n) args
         _ -> error "did you call this on a non function?"
-    let derive = DerivClause Nothing [ConT (mkName "Generic"), ConT (mkName "Binny")]
+    let derive = DerivClause Nothing [ConT (mkName "Show"), ConT (mkName "Generic"), ConT (mkName "Binny")]
     return $ DataD [] remoteStruct [] Nothing cons [derive]
 
 listToApp :: [Exp] -> Exp

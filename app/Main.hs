@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -10,23 +11,26 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Generics (Generic)
 import Network.Run.TCP (runTCPClient, runTCPServer)
 import Network.Socket.ByteString (recv, sendAll)
+import RPC (createRPC)
 
-newtype Env = Env {counter :: Int}
+newtype Env = Env {counter :: Int} deriving (Show)
 
 updateRef :: (a -> a) -> IORef a -> IO ()
 updateRef f r = readIORef r >>= writeIORef r . f
 readRef :: IORef a -> IO a
 readRef = readIORef
 
-updateCounter :: Int -> IORef Env -> IO ()
-updateCounter i = updateRef $ \env -> env{counter = counter env + i}
+updateEnv :: Int -> IORef Env -> IO ()
+updateEnv i = updateRef $ \env -> env{counter = counter env + i}
 getCounter :: IORef Env -> IO Int
 getCounter = (counter <$>) . readIORef
 
-data Message
-  = UpdateCounter Int
-  | GetCounter
-  deriving (Show, Generic, Binny)
+updateCounter :: Env -> Int -> Env
+updateCounter e i = e{counter = counter e + i}
+getCounterLocal :: Env -> Int
+getCounterLocal = counter
+
+$(createRPC "Env" ["updateCounter"])
 
 serve :: Env -> IO ()
 serve rawE = do
@@ -34,22 +38,22 @@ serve rawE = do
   void . runTCPServer (Just "localhost") "8000" $ \s -> do
     msg <- debin <$> recv s 1024
     case msg of
-      UpdateCounter i -> do
-        updateCounter i e
-      GetCounter -> do
-        i <- getCounter e
-        sendAll s $ BS.pack [fromIntegral i]
+      R'updateCounter i -> do
+        updateEnv i e
+        r <- readIORef e
+        print r
+        sendAll s (BS.singleton 0)
 
 main :: IO ()
 main = do
   void . forkIO . serve $ Env 0
+  let e = Env'R "localhost" "8000"
   forever $ do
-    runTCPClient "localhost" "8000" $ \s -> do
-      sendAll s (bin (UpdateCounter 3))
-    a <- runTCPClient "localhost" "8000" $ \s -> do
-      sendAll s (bin GetCounter)
-      recv s 1024
-    print . head . BS.unpack $ a
+    updateCounter'R e 1
+    -- a <- runTCPClient "localhost" "8000" $ \s -> do
+    --   sendAll s (bin GetCounter)
+    --   recv s 1024
+    -- print . head . BS.unpack $ a
     -- ans <- recv s 1024
     -- print ans
     threadDelay 3000

@@ -27,7 +27,7 @@ library
 executable HasTEEProcedureCall
     import:           warnings
     main-is:          Main.hs
-    other-modules: Binny
+    other-modules: Binny, RPC
     -- other-extensions:
     build-depends:
         base >=4.18.2.0,
@@ -35,7 +35,8 @@ executable HasTEEProcedureCall
         network-run,
         network,
         bytestring,
-        generic-deriving
+        generic-deriving,
+        template-haskell
 
     hs-source-dirs:   app
     default-language: GHC2021

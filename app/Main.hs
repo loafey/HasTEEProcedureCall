@@ -11,7 +11,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Generics (Generic)
 import Network.Run.TCP (runTCPClient, runTCPServer)
 import Network.Socket.ByteString (recv, sendAll)
-import RPC (createRPC)
+import RPC (expose)
 
 newtype Env = Env {counter :: Int} deriving (Show)
 
@@ -27,7 +27,7 @@ updateCounter2 e i j = e{counter = counter e + i + j}
 getCounter :: Env -> Int
 getCounter = counter
 
-$(createRPC "Env" ["updateCounter", "updateCounter2", "getCounter"])
+$(expose "Env" ["updateCounter", "updateCounter2", "getCounter"])
 
 serve :: Env -> IO ()
 serve rawE = do
@@ -49,6 +49,8 @@ serve rawE = do
         let ansLen = BS.length ans
         sendAll s (bin ansLen)
         sendAll s ans
+
+acc = serve'Env
 
 main :: IO ()
 main = do

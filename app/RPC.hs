@@ -4,6 +4,7 @@
 module RPC where
 
 import Control.Monad
+import Data.Bifunctor (second)
 import Data.ByteString qualified as BS
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Name (..), OccName (OccName))
@@ -34,13 +35,10 @@ ioLast = \case
     ConT t -> (AppT (ConT . mkName $ "IO") (ConT t))
     x -> x
 
-createDataStruct :: String -> [String] -> Q Dec
-createDataStruct st strs = do
-    (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
-    let struct = Name (OccName o1) f1
-    let remoteStruct = mkName (o1 ++ "'R'Message")
+getFuncCons :: Name -> [String] -> Q [(Name, [BangType])]
+getFuncCons struct strs = do
     info <- mapM (reify . mkName) strs
-    cons <- forM info $ \case
+    forM info $ \case
         VarI (Name (OccName n) _) t _ -> do
             let list = argList t
             let mutate =
@@ -53,8 +51,15 @@ createDataStruct st strs = do
                             then init . tail $ list
                             else tail . tail $ list
                         )
-            pure $ NormalC (mkName $ "R'" <> n) args
+            pure $ (mkName $ "R'" <> n, args)
         _ -> error "did you call this on a non function?"
+
+createDataStruct :: String -> [String] -> Q Dec
+createDataStruct st strs = do
+    (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
+    let struct = Name (OccName o1) f1
+    let remoteStruct = mkName (o1 ++ "'R'Message")
+    cons <- map (uncurry NormalC) <$> getFuncCons struct strs
     let derive = DerivClause Nothing [ConT (mkName "Show"), ConT (mkName "Generic"), ConT (mkName "Binny")]
     return $ DataD [] remoteStruct [] Nothing cons [derive]
 
@@ -127,16 +132,49 @@ createRemoteStruct st = do
             ]
     return $ DataD [] remoteStruct [] Nothing cons []
 
-createServeFunc :: String -> Q Dec
-createServeFunc = debug "not implemented"
+createServeFunc :: String -> [String] -> Q [Dec]
+createServeFunc st strs = do
+    (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
+    let struct = Name (OccName o1) f1
+    let name = mkName ("serve'" <> o1)
+    let lamArgs = [VarP . mkName $ "rawE"]
+    let messageStruct = pure . ConT $ mkName (o1 ++ "'R'Message")
+    cons <-
+        map
+            ( second
+                (zipWith (\a _ -> "a" <> show a) [0 :: Int ..])
+            )
+            <$> getFuncCons struct strs
+    let case' =
+            pure $
+                CaseE
+                    (VarE . mkName $ "msg")
+                    ( flip map cons $ \(n, vars) ->
+                        Match (ConP n [] (map (VarP . mkName) vars)) (NormalB undefined) []
+                    )
+    call <-
+        [|
+            do
+                e <- newIORef rawE
+                void . runTCPServer (Just "localhost") "8000" $ \s -> do
+                    len <- debin <$> recv s 4
+                    msg <- (debin <$> recv s len) :: IO $messageStruct
+                    $case'
+                    pure ()
+            |]
+    let types = SigD name (AppT (AppT ArrowT (ConT $ mkName "String")) (AppT (ConT . mkName $ "IO") (ConT . mkName $ "()")))
+    return
+        [ types
+        , FunD name [Clause [] (NormalB $ LamE lamArgs call) []]
+        ]
 
-createRPC :: String -> [String] -> Q [Dec]
-createRPC s str = do
-    -- serveFunc <- createServeFunc s
+expose :: String -> [String] -> Q [Dec]
+expose s str = do
+    serveFunc <- createServeFunc s str
     remoteStruct <- createRemoteStruct s
     dataStruct <- createDataStruct s str
     functions <- createFunctions s str
-    pure $ remoteStruct : dataStruct : functions
+    pure $ remoteStruct : dataStruct : functions <> serveFunc
 
 debug :: forall a b. (Show a) => a -> b
 debug = error . show

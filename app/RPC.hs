@@ -161,11 +161,11 @@ createServeFunc st strs = do
     let mkCase eRef (t, (con, vars)) = do
             let mutate = doesMutate struct t
             save <- [e|writeIORef $(pure $ VarE eRef)|]
-            let args = generateArgs con ("e" : vars)
+            let args = generateArgs con ("e'" : vars)
             let call = pure (AppE save args)
             let readRef = [e|(readIORef $(pure $ VarE eRef))|]
 
-            let e = mkName "e"
+            let e = mkName "e'"
 
             do' <-
                 if mutate
@@ -191,7 +191,7 @@ createServeFunc st strs = do
                     (NormalB do')
                     []
     let cases = do
-            let msg = mkName "msg"
+            let msg = mkName "msg'"
             let eRef = mkName "eRef"
             c <- mapM (mkCase eRef) cons
             pure $ LamE [VarP msg, VarP eRef] (CaseE (VarE msg) c)

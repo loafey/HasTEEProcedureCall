@@ -170,11 +170,11 @@ createServeFunc st strs = do
 
 expose :: String -> [String] -> Q [Dec]
 expose s str = do
-    serveFunc <- createServeFunc s str
+    -- serveFunc <- createServeFunc s str
     remoteStruct <- createRemoteStruct s
     dataStruct <- createDataStruct s str
     functions <- createFunctions s str
-    pure $ remoteStruct : dataStruct : functions <> serveFunc
+    pure $ remoteStruct : dataStruct : functions -- <> serveFunc
 
 debug :: forall a b. (Show a) => a -> b
 debug = error . show

@@ -58,8 +58,8 @@ instance (Bin' f, Bin' g) => Bin' ((:*:) f g) where -- (,)
     debin' :: BS.ByteString -> (:*:) f g p
     debin' bs =
         let aLen = debin bs :: Int
-            a = debin' bs
-            b = debin' $ BS.drop (aLen + 4) bs
+            a = debin' (BS.drop 4 bs)
+            b = debin' (BS.drop (aLen + 4) bs)
          in a :*: b
 
 instance (Binny c) => Bin' (K1 i c) where -- a container for a c

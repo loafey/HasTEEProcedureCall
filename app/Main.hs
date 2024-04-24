@@ -8,6 +8,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Debug.Trace (traceShowId)
 import GHC.Generics (Generic)
 import Network.Run.TCP (runTCPClient, runTCPServer)
 import Network.Socket.ByteString (recv, sendAll)
@@ -36,7 +37,7 @@ serve rawE = do
     len <- debin <$> recv s 4
     msg <- debin <$> recv s len
 
-    case msg of
+    case traceShowId msg of
       R'updateCounter i -> do
         updateRef e $ \env -> env{counter = counter env + i}
         sendAll s (BS.singleton 0)
@@ -49,8 +50,6 @@ serve rawE = do
         let ansLen = BS.length ans
         sendAll s (bin ansLen)
         sendAll s ans
-
-acc = serve'Env
 
 main :: IO ()
 main = do

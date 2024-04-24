@@ -3,10 +3,13 @@
 
 module Main where
 
-import Binny (Binny)
+import Binny (Binny (..))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import GHC.Generics (Generic)
+import Network.Run.TCP (runTCPClient, runTCPServer)
+import Network.Socket.ByteString (recv, sendAll)
 import RPC (expose)
 
 newtype Env = Env {counter :: Int} deriving (Show)
@@ -24,13 +27,13 @@ $(expose "Env" ["updateCounter", "updateCounter2", "getCounter"])
 
 main :: IO ()
 main = do
-  void . forkIO . serve'Env $ Env 0
-  let e = Env'R "localhost" "8000"
-  forever $ do
-    updateCounter'R e 1
-    updateCounter2'R e 1 2
+    void . forkIO . serve'Env $ Env 0
+    let e = Env'R "localhost" "8000"
+    forever $ do
+        updateCounter'R e 1
+        updateCounter2'R e 1 2
 
-    curr <- getCounter'R e
-    print curr
+        curr <- getCounter'R e
+        print curr
 
-    threadDelay 300000
+        threadDelay 300000

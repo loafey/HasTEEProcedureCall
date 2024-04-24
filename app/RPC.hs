@@ -3,11 +3,15 @@
 
 module RPC where
 
+import Binny qualified as BN
 import Control.Monad
 import Data.Bifunctor (second)
 import Data.ByteString qualified as BS
+import Data.IORef qualified as IOR
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax (Name (..), OccName (OccName))
+import Network.Run.TCP qualified as RTCP
+import Network.Socket.ByteString qualified as NSBS
 
 argList :: Type -> [Type]
 argList = \case
@@ -96,24 +100,24 @@ createFunctions st strs = do
                 if mutate
                     then
                         [|
-                            runTCPClient addr port $ \s -> do
-                                let item = bin $cons
-                                let len = bin $ BS.length item
-                                sendAll s len
-                                sendAll s item
-                                _ <- recv s 1
+                            RTCP.runTCPClient addr port $ \s -> do
+                                let item = BN.bin $cons
+                                let len = BN.bin $ BS.length item
+                                NSBS.sendAll s len
+                                NSBS.sendAll s item
+                                _ <- NSBS.recv s 1
                                 pure ()
                             |]
                     else
                         [|
-                            runTCPClient addr port $ \s -> do
-                                let item = bin $cons
-                                let len = bin $ BS.length item
-                                sendAll s len
-                                sendAll s item
-                                ansLen <- debin <$> recv s 4
-                                ans <- recv s ansLen
-                                pure $ debin ans
+                            RTCP.runTCPClient addr port $ \s -> do
+                                let item = BN.bin $cons
+                                let len = BN.bin $ BS.length item
+                                NSBS.sendAll s len
+                                NSBS.sendAll s item
+                                ansLen <- BN.debin <$> NSBS.recv s 4
+                                ans <- NSBS.recv s ansLen
+                                pure $ BN.debin ans
                             |]
             let lamArgs = [ConP remoteStruct [] [VarP . mkName $ "addr", VarP . mkName $ "port"]] <> vars
             pure
@@ -160,10 +164,10 @@ createServeFunc st strs = do
                 )
     let mkCase eRef (t, (con, vars)) = do
             let mutate = doesMutate struct t
-            save <- [e|writeIORef $(pure $ VarE eRef)|]
+            save <- [e|IOR.writeIORef $(pure $ VarE eRef)|]
             let args = generateArgs con ("e'" : vars)
             let call = pure (AppE save args)
-            let readRef = [e|(readIORef $(pure $ VarE eRef))|]
+            let readRef = [e|(IOR.readIORef $(pure $ VarE eRef))|]
 
             let e = mkName "e'"
 
@@ -174,16 +178,16 @@ createServeFunc st strs = do
                             do
                                 $(pure $ VarP e) <- $readRef
                                 $call
-                                sendAll s (BS.singleton 0)
+                                NSBS.sendAll s (BS.singleton 0)
                             |]
                     else
                         [e|
                             do
                                 $(pure $ VarP e) <- $readRef
-                                let ans = bin ($(pure args))
-                                let len = bin (BS.length ans)
-                                sendAll s len
-                                sendAll s ans
+                                let ans = BN.bin ($(pure args))
+                                let len = BN.bin (BS.length ans)
+                                NSBS.sendAll s len
+                                NSBS.sendAll s ans
                             |]
             pure $
                 Match
@@ -198,10 +202,10 @@ createServeFunc st strs = do
     call <-
         [|
             do
-                e <- newIORef rawE
-                void . runTCPServer (Just "localhost") "8000" $ \s -> do
-                    len <- debin <$> recv s 4
-                    msg <- (debin <$> recv s len) :: IO $messageStruct
+                e <- IOR.newIORef rawE
+                void . RTCP.runTCPServer (Just "localhost") "8000" $ \s -> do
+                    len <- BN.debin <$> NSBS.recv s 4
+                    msg <- (BN.debin <$> NSBS.recv s len) :: IO $messageStruct
                     $(cases) msg e
             |]
     -- debug call

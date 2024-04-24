@@ -35,7 +35,7 @@ ioLast = \case
     ConT t -> (AppT (ConT . mkName $ "IO") (ConT t))
     x -> x
 
-getFuncCons :: Name -> [String] -> Q [(Name, [BangType])]
+getFuncCons :: Name -> [String] -> Q [(String, [BangType])]
 getFuncCons struct strs = do
     info <- mapM (reify . mkName) strs
     forM info $ \case
@@ -51,7 +51,7 @@ getFuncCons struct strs = do
                             then init . tail $ list
                             else tail . tail $ list
                         )
-            pure $ (mkName $ "R'" <> n, args)
+            pure (n, args)
         _ -> error "did you call this on a non function?"
 
 createDataStruct :: String -> [String] -> Q Dec
@@ -59,7 +59,7 @@ createDataStruct st strs = do
     (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
     let struct = Name (OccName o1) f1
     let remoteStruct = mkName (o1 ++ "'R'Message")
-    cons <- map (uncurry NormalC) <$> getFuncCons struct strs
+    cons <- map (\(n, s) -> NormalC (mkName $ "R'" <> n) s) <$> getFuncCons struct strs
     let derive = DerivClause Nothing [ConT (mkName "Show"), ConT (mkName "Generic"), ConT (mkName "Binny")]
     return $ DataD [] remoteStruct [] Nothing cons [derive]
 
@@ -67,6 +67,12 @@ listToApp :: [Exp] -> Exp
 listToApp [] = error "unreachable"
 listToApp [a] = a
 listToApp (a : bs) = AppE (listToApp bs) a
+
+doesMutate :: Name -> Type -> Bool
+doesMutate struct t =
+    let list = argList t
+     in (\(ConT n) -> n) (head list) == struct
+            && (\(ConT n) -> n) (last list) == struct
 
 createFunctions :: String -> [String] -> Q [Dec]
 createFunctions st strs = do
@@ -80,9 +86,7 @@ createFunctions st strs = do
             let name = mkName (n <> "'R")
             let dataName = ConE $ mkName ("R'" <> n)
             let list = argList t
-            let mutate =
-                    (\(ConT n) -> n) (head list) == struct
-                        && (\(ConT n) -> n) (last list) == struct
+            let mutate = doesMutate struct t
             let consLen = length list - 3
             let vars = map (\c -> VarP . mkName $ "a" <> show c) [0 .. consLen]
             let constructor = listToApp . reverse $ dataName : map (\c -> VarE . mkName $ "a" <> show c) [0 .. consLen]
@@ -132,6 +136,9 @@ createRemoteStruct st = do
             ]
     return $ DataD [] remoteStruct [] Nothing cons []
 
+generateArgs :: String -> [String] -> Exp
+generateArgs start h = foldl AppE (VarE . mkName $ start) (map (VarE . mkName) h)
+
 createServeFunc :: String -> [String] -> Q [Dec]
 createServeFunc st strs = do
     (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
@@ -139,19 +146,55 @@ createServeFunc st strs = do
     let name = mkName ("serve'" <> o1)
     let lamArgs = [VarP . mkName $ "rawE"]
     let messageStruct = pure . ConT $ mkName (o1 ++ "'R'Message")
+    info <- mapM (reify . mkName) strs
+    defs <- forM info $ \case
+        VarI (Name _ _) t _ -> pure t
+        _ -> error "non function"
     cons <-
-        map
-            ( second
-                (zipWith (\a _ -> "a" <> show a) [0 :: Int ..])
-            )
-            <$> getFuncCons struct strs
-    let case' =
-            pure $
-                CaseE
-                    (VarE . mkName $ "msg")
-                    ( flip map cons $ \(n, vars) ->
-                        Match (ConP n [] (map (VarP . mkName) vars)) (NormalB undefined) []
+        zip defs
+            <$> ( map
+                    ( second
+                        (zipWith (\a _ -> "a" <> show a) [0 :: Int ..])
                     )
+                    <$> getFuncCons struct strs
+                )
+    let mkCase eRef (t, (con, vars)) = do
+            let mutate = doesMutate struct t
+            save <- [e|writeIORef $(pure $ VarE eRef)|]
+            let args = generateArgs con ("e" : vars)
+            let call = pure (AppE save args)
+            let readRef = [e|(readIORef $(pure $ VarE eRef))|]
+
+            let e = mkName "e"
+
+            do' <-
+                if mutate
+                    then
+                        [e|
+                            do
+                                $(pure $ VarP e) <- $readRef
+                                $call
+                                sendAll s (BS.singleton 0)
+                            |]
+                    else
+                        [e|
+                            do
+                                $(pure $ VarP e) <- $readRef
+                                let ans = bin ($(pure args))
+                                let len = bin (BS.length ans)
+                                sendAll s len
+                                sendAll s ans
+                            |]
+            pure $
+                Match
+                    (ConP (mkName $ "R'" <> con) [] (map (VarP . mkName) vars))
+                    (NormalB do')
+                    []
+    let cases = do
+            let msg = mkName "msg"
+            let eRef = mkName "eRef"
+            c <- mapM (mkCase eRef) cons
+            pure $ LamE [VarP msg, VarP eRef] (CaseE (VarE msg) c)
     call <-
         [|
             do
@@ -159,10 +202,10 @@ createServeFunc st strs = do
                 void . runTCPServer (Just "localhost") "8000" $ \s -> do
                     len <- debin <$> recv s 4
                     msg <- (debin <$> recv s len) :: IO $messageStruct
-                    $case'
-                    pure ()
+                    $(cases) msg e
             |]
-    let types = SigD name (AppT (AppT ArrowT (ConT $ mkName "String")) (AppT (ConT . mkName $ "IO") (ConT . mkName $ "()")))
+    -- debug call
+    types <- SigD name <$> [t|$(pure $ ConT $ mkName st) -> IO ()|]
     return
         [ types
         , FunD name [Clause [] (NormalB $ LamE lamArgs call) []]
@@ -170,11 +213,11 @@ createServeFunc st strs = do
 
 expose :: String -> [String] -> Q [Dec]
 expose s str = do
-    -- serveFunc <- createServeFunc s str
+    serveFunc <- createServeFunc s str
     remoteStruct <- createRemoteStruct s
     dataStruct <- createDataStruct s str
     functions <- createFunctions s str
-    pure $ remoteStruct : dataStruct : functions -- <> serveFunc
+    pure $ remoteStruct : dataStruct : functions <> serveFunc
 
 debug :: forall a b. (Show a) => a -> b
 debug = error . show

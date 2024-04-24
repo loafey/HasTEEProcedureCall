@@ -87,15 +87,15 @@ createFunctions st strs = do
     defs <- forM info $ \case
         VarI (Name (OccName n) _) t _ -> do
             let newType = replaceArg struct remoteStruct t
-            let name = mkName (n <> "'R")
-            let dataName = ConE $ mkName ("R'" <> n)
-            let list = argList t
-            let mutate = doesMutate struct t
-            let consLen = length list - 3
-            let vars = map (\c -> VarP . mkName $ "a" <> show c) [0 .. consLen]
-            let constructor = listToApp . reverse $ dataName : map (\c -> VarE . mkName $ "a" <> show c) [0 .. consLen]
-            let cons = pure constructor
-            let types = (if mutate then ioUnitLast else ioLast) newType
+                name = mkName (n <> "'R")
+                dataName = ConE $ mkName ("R'" <> n)
+                list = argList t
+                mutate = doesMutate struct t
+                consLen = length list - 3
+                vars = map (\c -> VarP . mkName $ "a" <> show c) [0 .. consLen]
+                constructor = listToApp . reverse $ dataName : map (\c -> VarE . mkName $ "a" <> show c) [0 .. consLen]
+                cons = pure constructor
+                types = (if mutate then ioUnitLast else ioLast) newType
             call <-
                 if mutate
                     then
@@ -147,9 +147,9 @@ createServeFunc :: String -> [String] -> Q [Dec]
 createServeFunc st strs = do
     (TyConI (NewtypeD _ (Name (OccName o1) f1) _ _ _ _)) <- reify . mkName $ st
     let struct = Name (OccName o1) f1
-    let name = mkName ("serve'" <> o1)
-    let lamArgs = [VarP . mkName $ "rawE"]
-    let messageStruct = pure . ConT $ mkName (o1 ++ "'R'Message")
+        name = mkName ("serve'" <> o1)
+        lamArgs = [VarP . mkName $ "rawE"]
+        messageStruct = pure . ConT $ mkName (o1 ++ "'R'Message")
     info <- mapM (reify . mkName) strs
     defs <- forM info $ \case
         VarI (Name _ _) t _ -> pure t
@@ -166,10 +166,9 @@ createServeFunc st strs = do
             let mutate = doesMutate struct t
             save <- [e|IOR.writeIORef $(pure $ VarE eRef)|]
             let args = generateArgs con ("e'" : vars)
-            let call = pure (AppE save args)
-            let readRef = [e|(IOR.readIORef $(pure $ VarE eRef))|]
-
-            let e = mkName "e'"
+                call = pure (AppE save args)
+                readRef = [e|(IOR.readIORef $(pure $ VarE eRef))|]
+                e = mkName "e'"
 
             do' <-
                 if mutate
